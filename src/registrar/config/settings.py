@@ -483,6 +483,11 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
+        "epplibwrapper": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
         # Our app!
         "registrar": {
             "handlers": ["console"],
