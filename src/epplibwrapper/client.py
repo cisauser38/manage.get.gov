@@ -14,6 +14,7 @@ from django.conf import settings
 
 from .cert import Cert, Key
 from .errors import ErrorCode, LoginError, RegistryError
+from registrar.models.utility.generic_helper import Timer
 
 logger = logging.getLogger(__name__)
 
@@ -52,19 +53,15 @@ class EPPLibWrapper:
                 "urn:ietf:params:xml:ns:contact-1.0",
             ],
         )
-        try:
-            self._initialize_client()
-        except Exception:
-            logger.warning("Unable to configure epplib. Registrar cannot contact registry.")
 
-    def _initialize_client(self) -> None:
+    def _initialize_client(self) -> Client:
         """Initialize a client, assuming _login defined. Sets _client to initialized
         client. Raises errors if initialization fails.
         This method will be called at app initialization, and also during retries."""
         # establish a client object with a TCP socket transport
         # note that type: ignore added in several places because linter complains
         # about _client initially being set to None, and None type doesn't match code
-        self._client = Client(  # type: ignore
+        client = Client(  # type: ignore
             SocketTransport(
                 settings.SECRET_REGISTRY_HOSTNAME,
                 cert_file=CERT.filename,
@@ -74,10 +71,10 @@ class EPPLibWrapper:
         )
         try:
             # use the _client object to connect
-            self._client.connect()  # type: ignore
-            response = self._client.send(self._login)  # type: ignore
+            client.connect()  # type: ignore
+            response = client.send(self._login)  # type: ignore
             if response.code >= 2000:  # type: ignore
-                self._client.close()  # type: ignore
+                client.close()  # type: ignore
                 raise LoginError(response.msg)  # type: ignore
         except TransportError as err:
             message = "_initialize_client failed to execute due to a connection error."
@@ -89,25 +86,22 @@ class EPPLibWrapper:
             message = "_initialize_client failed to execute due to an unknown error."
             logger.error(f"{message} Error: {err}")
             raise RegistryError(message) from err
+        return client
 
-    def _disconnect(self) -> None:
+    def _disconnect(self, client) -> None:
         """Close the connection."""
         try:
-            self._client.send(commands.Logout())  # type: ignore
-            self._client.close()  # type: ignore
+            client.send(commands.Logout())  # type: ignore
+            client.close()  # type: ignore
         except Exception:
             logger.warning("Connection to registry was not cleanly closed.")
 
-    def _send(self, command):
+    def _send(self, client, command):
         """Helper function used by `send`."""
         cmd_type = command.__class__.__name__
 
         try:
-            # check for the condition that the _client was not initialized properly
-            # at app initialization
-            if self._client is None:
-                self._initialize_client()
-            response = self._client.send(command)
+            response = client.send(command)
         except (ValueError, ParsingError) as err:
             message = f"{cmd_type} failed to execute due to some syntax error."
             logger.error(f"{message} Error: {err}")
@@ -132,35 +126,30 @@ class EPPLibWrapper:
             else:
                 return response
 
-    def _retry(self, command):
-        """Retry sending a command through EPP by re-initializing the client
-        and then sending the command."""
-        # re-initialize by disconnecting and initial
-        self._disconnect()
-        self._initialize_client()
-        return self._send(command)
-
     def send(self, command, *, cleaned=False):
         """Login, the send the command. Retry once if an error is found"""
         # try to prevent use of this method without appropriate safeguards
         cmd_type = command.__class__.__name__
-        if not cleaned:
-            raise ValueError("Please sanitize user input before sending it.")
-        try:
-            return self._send(command)
-        except RegistryError as err:
-            if (
-                err.is_transport_error()
-                or err.is_connection_error()
-                or err.is_session_error()
-                or err.is_server_error()
-                or err.should_retry()
-            ):
-                message = f"{cmd_type} failed and will be retried"
-                logger.info(f"{message} Error: {err}")
-                return self._retry(command)
-            else:
+        logger.info(f"about to execute EPP command {cmd_type}")
+        with Timer():
+            if not cleaned:
+                raise ValueError("Please sanitize user input before sending it.")
+            client = None
+            try:
+                logger.info("about to initialize EPP client")
+                with Timer():
+                    client = self._initialize_client()
+                logger.info("about to send to EPP client")
+                with Timer():
+                    response = self._send(client,command)
+                return response
+            except RegistryError as err:
                 raise err
+            finally:
+                if client:
+                    logger.info("about to disconnect")
+                    with Timer():
+                        self._disconnect(client)
 
 
 try:
