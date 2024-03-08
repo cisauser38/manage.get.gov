@@ -2,6 +2,10 @@
 
 import logging
 
+from time import sleep
+from gevent import Timeout
+from epplibwrapper.utility.pool_status import PoolStatus
+
 try:
     from epplib.client import Client
     from epplib import commands
@@ -13,6 +17,8 @@ except ImportError:
 
 from .cert import Cert, Key
 from .errors import ErrorCode, LoginError, RegistryError
+from .socket import Socket
+from .utility.pool import EPPConnectionPool
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +43,8 @@ class EPPLibWrapper:
     ATTN: This should not be used directly. Use `Domain` from domain.py.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, start_connection_pool=True) -> None:
         """Initialize settings which will be used for all connections."""
-        # set _client to None initially. In the event that the __init__ fails
-        # before _client initializes, app should still start and be in a state
-        # that it can attempt _client initialization on send attempts
-        self._client = None  # type: ignore
         # prepare (but do not send) a Login command
         self._login = commands.Login(
             cl_id=settings.SECRET_REGISTRY_CL_ID,
@@ -52,10 +54,6 @@ class EPPLibWrapper:
                 "urn:ietf:params:xml:ns:contact-1.0",
             ],
         )
-        try:
-            self._initialize_client()
-        except Exception:
-            logger.warning("Unable to configure epplib. Registrar cannot contact registry.")
 
         self.pool_options = {
             # Pool size
@@ -81,64 +79,69 @@ class EPPLibWrapper:
         """Helper function used by `send`."""
         cmd_type = command.__class__.__name__
 
+        # Start a timeout to check if the pool is hanging
+        timeout = Timeout(settings.POOL_TIMEOUT)
+        timeout.start()
+
         try:
-            # check for the condition that the _client was not initialized properly
-            # at app initialization
-            if self._client is None:
-                self._initialize_client()
-            response = self._client.send(command)
+            if not self.pool_status.connection_success:
+                raise LoginError("Couldn't connect to the registry after three attempts")
+            with self._pool.get() as connection:
+                response = connection.send(command)
+        except Timeout as t:
+            # If more than one pool exists,
+            # multiple timeouts can be floating around.
+            # We need to be specific as to which we are targeting.
+            if t is timeout:
+                # Flag that the pool is frozen,
+                # then restart the pool.
+                self.pool_status.pool_hanging = True
+                logger.error("Pool timed out")
+                self.start_connection_pool()
         except (ValueError, ParsingError) as err:
             message = f"{cmd_type} failed to execute due to some syntax error."
-            logger.error(f"{message} Error: {err}")
+            logger.error(f"{message} Error: {err}", exc_info=True)
             raise RegistryError(message) from err
         except TransportError as err:
             message = f"{cmd_type} failed to execute due to a connection error."
-            logger.error(f"{message} Error: {err}")
+            logger.error(f"{message} Error: {err}", exc_info=True)
             raise RegistryError(message, code=ErrorCode.TRANSPORT_ERROR) from err
         except LoginError as err:
             # For linter due to it not liking this line length
             text = "failed to execute due to a registry login error."
             message = f"{cmd_type} {text}"
-            logger.error(f"{message} Error: {err}")
+            logger.error(f"{message} Error: {err}", exc_info=True)
             raise RegistryError(message) from err
         except Exception as err:
             message = f"{cmd_type} failed to execute due to an unknown error."
-            logger.error(f"{message} Error: {err}")
+            logger.error(f"{message} Error: {err}", exc_info=True)
             raise RegistryError(message) from err
         else:
             if response.code >= 2000:
                 raise RegistryError(response.msg, code=response.code)
             else:
                 return response
-
-    def _retry(self, command):
-        """Retry sending a command through EPP by re-initializing the client
-        and then sending the command."""
-        # re-initialize by disconnecting and initial
-        self._disconnect()
-        self._initialize_client()
-        return self._send(command)
+        finally:
+            # Close the timeout no matter what happens
+            timeout.close()
 
     def send(self, command, *, cleaned=False):
-        """Login, the send the command. Retry once if an error is found"""
+        """Login, send the command, then close the connection. Tries 3 times."""
         # try to prevent use of this method without appropriate safeguards
-        cmd_type = command.__class__.__name__
         if not cleaned:
             raise ValueError("Please sanitize user input before sending it.")
-        try:
-            return self._send(command)
-        except RegistryError as err:
-            if (
-                err.is_transport_error()
-                or err.is_connection_error()
-                or err.is_session_error()
-                or err.is_server_error()
-                or err.should_retry()
-            ):
-                message = f"{cmd_type} failed and will be retried"
-                logger.info(f"{message} Error: {err}")
-                return self._retry(command)
-            else:
+
+        # Reopen the pool if its closed
+        # Only occurs when a login error is raised, after connection is successful
+        if not self.pool_status.pool_running:
+            # We want to reopen the connection pool,
+            # but we don't want the end user to wait while it opens.
+            # Raise syntax doesn't allow this, so we use a try/catch
+            # block.
+            try:
+                logger.error("Can't contact the Registry. Pool was not running.")
+                raise RegistryError("Can't contact the Registry. Pool was not running.")
+            except RegistryError as err:
                 raise err
             finally:
                 # Code execution will halt after here.
@@ -228,4 +231,5 @@ try:
     CLIENT = EPPLibWrapper()
     logger.info("registry client initialized")
 except Exception:
-    logger.warning("Unable to configure epplib. Registrar cannot contact registry.")
+    CLIENT = None  # type: ignore
+    logger.warning("Unable to configure epplib. Registrar cannot contact registry.", exc_info=True)
