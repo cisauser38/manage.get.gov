@@ -27,9 +27,10 @@ class EPPConnectionPool(ConnectionPool):
         base class
     """
 
-    def __init__(self, client, login, options: dict):
+    def __init__(self, cert, key, login, options: dict):
         # For storing shared credentials
-        self._client = client
+        self._cert = cert
+        self._key = key
         self._login = login
 
         # Keep track of each greenlet
@@ -63,7 +64,7 @@ class EPPConnectionPool(ConnectionPool):
         self.populate_all_connections()
 
     def _new_connection(self):
-        socket = self._create_socket(self._client, self._login)
+        socket = self._create_socket(self._cert, self._key, self._login)
         try:
             connection = socket.connect()
             return connection
@@ -100,9 +101,9 @@ class EPPConnectionPool(ConnectionPool):
                 pass
             gevent.sleep(delay)
 
-    def _create_socket(self, client, login) -> Socket:
+    def _create_socket(self, cert, key, login) -> Socket:
         """Creates and returns a socket instance"""
-        socket = Socket(client, login)
+        socket = Socket(cert, key, login)
         return socket
 
     def get_connections(self):

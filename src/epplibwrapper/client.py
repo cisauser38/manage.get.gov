@@ -10,11 +10,10 @@ try:
     from epplib.client import Client
     from epplib import commands
     from epplib.exceptions import TransportError, ParsingError
-    from epplib.transport import SocketTransport
+
 except ImportError:
     pass
 
-from django.conf import settings
 
 from .cert import Cert, Key
 from .errors import ErrorCode, LoginError, RegistryError
@@ -35,6 +34,7 @@ except Exception:
         exc_info=True,
     )
 
+from django.conf import settings
 
 class EPPLibWrapper:
     """
@@ -53,16 +53,6 @@ class EPPLibWrapper:
                 "urn:ietf:params:xml:ns:domain-1.0",
                 "urn:ietf:params:xml:ns:contact-1.0",
             ],
-        )
-
-        # establish a client object with a TCP socket transport
-        self._client = Client(
-            SocketTransport(
-                settings.SECRET_REGISTRY_HOSTNAME,
-                cert_file=CERT.filename,
-                key_file=KEY.filename,
-                password=settings.SECRET_REGISTRY_KEY_PASSPHRASE,
-            )
         )
 
         self.pool_options = {
@@ -202,7 +192,7 @@ class EPPLibWrapper:
                 self.kill_pool()
                 logger.info("Old pool killed")
 
-            self._pool = self._create_pool(self._client, self._login, self.pool_options)
+            self._pool = self._create_pool(CERT, KEY, self._login, self.pool_options)
 
             self.pool_status.pool_running = True
             self.pool_status.pool_hanging = False
@@ -226,7 +216,7 @@ class EPPLibWrapper:
         can be contacted
         """
         # This is closed in test_connection_success
-        socket = Socket(self._client, self._login)
+        socket = Socket(CERT, KEY, self._login)
         can_login = False
 
         # Something went wrong if this doesn't exist

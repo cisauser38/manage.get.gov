@@ -4,6 +4,7 @@ from time import sleep
 try:
     from epplib import commands
     from epplib.client import Client
+    from epplib.transport import SocketTransport
 except ImportError:
     pass
 
@@ -12,22 +13,22 @@ from .errors import LoginError
 
 logger = logging.getLogger(__name__)
 
+from django.conf import settings
 
 class Socket:
     """Context manager which establishes a TCP connection with registry."""
 
-    def __init__(self, client: Client, login: commands.Login) -> None:
+    def __init__(self, cert, key, login: commands.Login) -> None:
         """Save the epplib client and login details."""
-        self.client = client
+        self.client = Client(
+            SocketTransport(
+                settings.SECRET_REGISTRY_HOSTNAME,
+                cert_file=cert.filename,
+                key_file=key.filename,
+                password=settings.SECRET_REGISTRY_KEY_PASSPHRASE,
+            )
+        )
         self.login = login
-
-    def __enter__(self):
-        """Runs connect(), which opens a connection with EPPLib."""
-        self.connect()
-
-    def __exit__(self, *args, **kwargs):
-        """Runs disconnect(), which closes a connection with EPPLib."""
-        self.disconnect()
 
     def connect(self):
         """Use epplib to connect."""
