@@ -24,6 +24,7 @@ need to be exported:
 * Websites
 * Host
 * HostIP
+* PublicContact
 
 ### Import
 
@@ -38,6 +39,7 @@ Delete all rows from tables in the following order through django admin:
 
 * DomainInformation
 * DomainRequest
+* PublicContact
 * Domain
 * User (all but the current user)
 * Contact
@@ -54,6 +56,7 @@ order:
 * User (After importing User table, you need to delete all rows from Contact table before importing Contacts)
 * Contact
 * Domain
+* PublicContact
 * Host
 * HostIP
 * DraftDomain

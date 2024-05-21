@@ -2245,9 +2245,18 @@ class DraftDomainAdmin(ListHeaderAdmin, ImportExportModelAdmin):
         return response
 
 
-class PublicContactAdmin(ListHeaderAdmin):
+class PublicContactResource(resources.ModelResource):
+    """defines how each field in the referenced model should be mapped to the corresponding fields in the
+    import/export file"""
+
+    class Meta:
+        model = models.PublicContact
+
+
+class PublicContactAdmin(ListHeaderAdmin, ImportExportModelAdmin):
     """Custom PublicContact admin class."""
 
+    resource_classes = [PublicContactResource]
     change_form_template = "django/admin/email_clipboard_change_form.html"
     autocomplete_fields = ["domain"]
 
