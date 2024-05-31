@@ -40,13 +40,13 @@ Delete all rows from tables in the following order through django admin:
 * DomainInformation
 * DomainRequest
 * PublicContact
+* HostIP
+* Host
 * Domain
 * User (all but the current user)
 * Contact
 * Websites
 * DraftDomain
-* HostIP
-* Host
 
 #### Importing into Target Environment
 
