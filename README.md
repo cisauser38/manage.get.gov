@@ -8,7 +8,7 @@ For new members of the @cisagov/dotgov team looking to contribute to the registr
 
 ## Code
 
-Code is located in the [src](./src/) directory.
+Code is located in the [src](./src/) directory. 
 
 ## Documentation
 
