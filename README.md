@@ -22,4 +22,4 @@ These are located in [docs/product](./docs/product).
 
 ### Research Artifacts
 
-Including some helpful scanning tools. These are located in [docs/research](./docs/research)
+Including some helpful scanning tools. These are located in [docs/research](./docs/research) 
